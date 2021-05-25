@@ -322,7 +322,7 @@ copyuvm(pde_t *pgdir, uint sz)
 
   if((d = setupkvm()) == 0)
     return 0;
-  for(i = 0; i < sz; i += PGSIZE){
+  for(i = PGSIZE; i < sz; i += PGSIZE){
     if((pte = walkpgdir(pgdir, (void *) i, 0)) == 0)
       panic("copyuvm: pte should exist");
     if(!(*pte & PTE_P))
@@ -384,6 +384,70 @@ copyout(pde_t *pgdir, uint va, void *p, uint len)
   }
   return 0;
 }
+
+//change the protection level to readonly 
+//for len number of pages starting from addr
+int
+mprotect(void *addr, int len){
+  struct proc *curproc = myproc();
+
+  //error out when len is negative/zero
+  //OR if the address range specified is outside the size of process
+  if( len <= 0 || (int)addr + len*PGSIZE > curproc->sz )
+    return -1;
+
+  //if the address is not a multiple of PGSIZE, error out
+  if((int)(((int)addr) % PGSIZE))
+    return -1;
+
+  pte_t *pte;
+  int i;
+
+  //for each page, find the pagetable entry for addr 
+  //check if the address translation is present in the pagetable
+  //if present, unset the writable bit
+  //returns -1, if the va=>pa mapping is not found in the page table
+  for (i = (int)addr; i < ((int)addr + len*PGSIZE); i+= PGSIZE)
+  {
+    pte = walkpgdir(curproc->pgdir, (void*)i, 0);
+    if( pte && (*pte & PTE_P) )
+      *pte = (*pte) & (~PTE_W) ; //Clearing the write bit
+    else 
+      return -1;
+  }
+
+  //refresh the CR3 so that it so that it picks up the flags changed
+  lcr3(V2P(curproc->pgdir));
+return 0;
+}
+
+//change the protection of len number of pages starting from addr
+int
+munprotect(void *addr, int len){
+  struct proc *curproc = myproc();
+
+  if( len <= 0 || (int)addr + len*PGSIZE > curproc->sz )
+    return -1;
+
+  if((int)((int)addr % PGSIZE ))
+    return -1;
+
+  pte_t *pte;
+  int i;
+  //set the writable bit for each page in range [addr, addr + len*PGSIZE )
+  for (i = (int)addr; i < ((int)addr + len * PGSIZE); i+= PGSIZE)
+  {
+    pte = walkpgdir(curproc->pgdir, (void*)i, 0);
+    if(pte && ((*pte & PTE_P)))
+      *pte = (*pte) | (PTE_W) ;
+    else
+      return -1;
+  }
+  lcr3(V2P(curproc->pgdir));
+
+  return 0;
+}
+
 
 //PAGEBREAK!
 // Blank page.
